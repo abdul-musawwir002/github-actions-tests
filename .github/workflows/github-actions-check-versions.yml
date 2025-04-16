@@ -1,0 +1,96 @@
+name: Version and Dependency Management
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  check-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      version-changed: ${{ steps.check-version.outputs.changed }}
+      requirements-changed: ${{ steps.check-requirements.outputs.changed }}
+      code-changed: ${{ steps.check-code.outputs.changed }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Check for version.json changes
+      id: check-version
+      run: |
+        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'version.json'; then
+          echo "Version file changed"
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check for requirements.txt changes
+      id: check-requirements
+      run: |
+        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt'; then
+          echo "Requirements file changed"
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Check for code changes (excluding version and requirements)
+      id: check-code
+      run: |
+        # Get list of changed files excluding version.json and requirements.txt
+        changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -v -E 'version.json|requirements.txt')
+        
+        if [ -n "$changed_files" ]; then
+          echo "Code files changed"
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Comment on PR about requirements (if code changed)
+      if: ${{ github.event_name == 'pull_request' && steps.check-code.outputs.changed == 'true' }}
+      uses: actions/github-script@v6
+      with:
+        script: |
+          await github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: "⚠️ Code changes detected. Please confirm if any new dependencies were added that should be included in requirements.txt:\n\n- [ ] Yes, requirements were added\n- [ ] No, requirements were not changed"
+          })
+
+  create-release:
+    needs: check-changes
+    if: ${{ needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true' }}
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Get version
+      id: version
+      run: |
+        VERSION=$(jq -r '.version' version.json)
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Create Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.version }}
+        release_name: Release v${{ steps.version.outputs.version }}
+        body: |
+          ### Changes in this release
+          - Version updated: ${{ needs.check-changes.outputs.version-changed == 'true' && 'Yes' || 'No' }}
+          - Requirements updated: ${{ needs.check-changes.outputs.requirements-changed == 'true' && 'Yes' || 'No' }}
+          
+          Check the pull request for details: ${{ github.event.pull_request.html_url }}
+        draft: false
+        prerelease: false
