@@ -39,19 +39,6 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Check for code changes (excluding version and requirements)
-      id: check-code
-      run: |
-        # Get list of changed files excluding version.json and requirements.txt
-        changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -v -E 'version.json|requirements.txt')
-        
-        if [ -n "$changed_files" ]; then
-          echo "Code files changed"
-          echo "changed=true" >> $GITHUB_OUTPUT
-        else
-          echo "changed=false" >> $GITHUB_OUTPUT
-        fi
-
     - name: Comment on PR about requirements (if code changed)
       if: ${{ github.event_name == 'pull_request' && steps.check-code.outputs.changed == 'true' }}
       uses: actions/github-script@v6
