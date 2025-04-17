@@ -54,16 +54,19 @@ jobs:
     - name: Notify about pending release
       if: steps.check-both-files.outputs.changed == 'true' && github.event.pull_request.merged != true
       uses: actions/github-script@v6
-      run: VERSION=$(jq -r '.version' version.json)
       with:
         script: |
+          // First read the version from version.json
+          const fs = require('fs');
+          const version = JSON.parse(fs.readFileSync('version.json')).version;
+          
           await github.rest.issues.createComment({
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: "📌 Release pending (v$VERSION): Both version.json and requirements.txt were modified. " +
+            body: `📌 Release pending (v${version}): Both version.json and requirements.txt were modified. ` +
                   "A release will be created automatically when this PR is merged."
-          })
+          });
 
     - name: Request requirements input (on every commit)
       if: |
