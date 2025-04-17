@@ -77,26 +77,14 @@ jobs:
         valid=true
         
         for req in $changed_reqs; do
-          # Extract pure package name (without extras/versions)
-          pkg=$(echo "$req" | sed -E 's/[[:space:]]*([^<>=!~;]+).*/\1/' | cut -d'[' -f1)
+          # Clean up requirement string
+          clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
           
-          # Check if version is specified
-          if [[ "$req" =~ [<>=~!]= ]]; then
-            # Use pip install --dry-run with the exact requirement
-            echo "Checking exact requirement: $req"
-            if ! pip install --dry-run "$req" &>/dev/null; then
-              echo "::error::Requirement not satisfiable: $req"
-              invalid_packages+=" $req"
-              valid=false
-            fi
-          else
-            # Just check package exists
-            echo "Checking package existence: $pkg"
-            if ! pip download --no-deps --dry-run "$pkg" &>/dev/null; then
-              echo "::error::Package not found on PyPI: $pkg"
-              invalid_packages+=" $pkg"
-              valid=false
-            fi
+          echo "Checking requirement: $clean_req"
+          if ! pip install --dry-run "$clean_req" &>/dev/null; then
+            echo "::error::Requirement not satisfiable: $clean_req"
+            invalid_packages+=" $clean_req"
+            valid=false
           fi
         done
 
