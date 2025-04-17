@@ -3,7 +3,12 @@ name: Version and Dependency Management
 on:
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
 
 jobs:
   check-changes:
@@ -12,6 +17,7 @@ jobs:
       version-changed: ${{ steps.check-version.outputs.changed }}
       requirements-changed: ${{ steps.check-requirements.outputs.changed }}
       code-changed: ${{ steps.check-code.outputs.changed }}
+      pr-open: ${{ github.event.action == 'opened' || github.event.action == 'reopened' }}
     
     steps:
     - name: Checkout repository
@@ -42,9 +48,7 @@ jobs:
     - name: Check for code changes (excluding version and requirements)
       id: check-code
       run: |
-        # Get list of changed files excluding version.json and requirements.txt
         changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -v -E 'version.json|requirements.txt')
-        
         if [ -n "$changed_files" ]; then
           echo "Code files changed"
           echo "changed=true" >> $GITHUB_OUTPUT
@@ -52,8 +56,8 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Comment on PR about requirements (if code changed)
-      if: ${{ github.event_name == 'pull_request' && steps.check-code.outputs.changed == 'true' }}
+    - name: Comment on PR about requirements
+      if: ${{ (steps.check-code.outputs.changed == 'true') && (github.event.action == 'opened' || github.event.action == 'reopened') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -66,7 +70,7 @@ jobs:
 
   create-release:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true' }}
+    if: ${{ (needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true') && github.event.action != 'closed' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -80,12 +84,10 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Create Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ steps.version.outputs.version }}
-        release_name: Release v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
         body: |
           ### Changes in this release
           - Version updated: ${{ needs.check-changes.outputs.version-changed == 'true' && 'Yes' || 'No' }}
@@ -94,3 +96,5 @@ jobs:
           Check the pull request for details: ${{ github.event.pull_request.html_url }}
         draft: false
         prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
