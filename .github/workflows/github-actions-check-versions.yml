@@ -3,6 +3,7 @@ name: Version and Dependency Management
 on:
   pull_request:
     branches: [ main ]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
@@ -12,6 +13,7 @@ jobs:
       version-changed: ${{ steps.check-version.outputs.changed }}
       requirements-changed: ${{ steps.check-requirements.outputs.changed }}
       code-changed: ${{ steps.check-code.outputs.changed }}
+      pr-open: ${{ github.event.action == 'opened' || github.event.action == 'reopened' }}
     
     steps:
     - name: Checkout repository
@@ -39,8 +41,8 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Comment on PR about requirements (if code changed)
-      if: ${{ github.event_name == 'pull_request' && steps.check-code.outputs.changed == 'true' }}
+    - name: Comment on PR about requirements (if code changed and PR is newly opened)
+      if: ${{ (steps.check-code.outputs.changed == 'true') && (github.event.action == 'opened' || github.event.action == 'reopened') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -53,7 +55,7 @@ jobs:
 
   create-release:
     needs: check-changes
-    if: ${{ needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true' }}
+    if: ${{ (needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true') && github.event.action != 'closed' }}
     runs-on: ubuntu-latest
     
     steps:
