@@ -6,6 +6,10 @@ on:
     types: [opened, synchronize, reopened]
   workflow_dispatch:
 
+permissions:
+  contents: write
+  pull-requests: write
+
 jobs:
   check-changes:
     runs-on: ubuntu-latest
@@ -41,7 +45,18 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Comment on PR about requirements (if code changed and PR is newly opened)
+    - name: Check for code changes (excluding version and requirements)
+      id: check-code
+      run: |
+        changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -v -E 'version.json|requirements.txt')
+        if [ -n "$changed_files" ]; then
+          echo "Code files changed"
+          echo "changed=true" >> $GITHUB_OUTPUT
+        else
+          echo "changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Comment on PR about requirements
       if: ${{ (steps.check-code.outputs.changed == 'true') && (github.event.action == 'opened' || github.event.action == 'reopened') }}
       uses: actions/github-script@v6
       with:
@@ -69,12 +84,10 @@ jobs:
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Create Release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: v${{ steps.version.outputs.version }}
-        release_name: Release v${{ steps.version.outputs.version }}
+        name: Release v${{ steps.version.outputs.version }}
         body: |
           ### Changes in this release
           - Version updated: ${{ needs.check-changes.outputs.version-changed == 'true' && 'Yes' || 'No' }}
@@ -83,3 +96,5 @@ jobs:
           Check the pull request for details: ${{ github.event.pull_request.html_url }}
         draft: false
         prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
