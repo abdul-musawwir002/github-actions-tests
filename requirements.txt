@@ -29,7 +29,7 @@ dnspython==2.6.1
 drf-spectacular==0.27.1
 drf-yasg==1.21.7
 ecdsa==0.18.0
-exceptiongroup==1.2.34
+exceptiongroup==1.2.0
 hyperlink==21.0.0
 idna==3.6
 incremental==22.10.0

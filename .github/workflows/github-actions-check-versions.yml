@@ -20,7 +20,6 @@ jobs:
       both-files-changed: ${{ steps.check-both-files.outputs.changed }}
       other-files-changed: ${{ steps.check-other-files.outputs.changed }}
       pending-release: ${{ steps.check-both-files.outputs.changed && !github.event.pull_request.merged }}
-      valid-requirements: ${{ steps.verify-pypi-packages.outputs.valid }}
     
     steps:
     - name: Checkout repository
@@ -50,51 +49,6 @@ jobs:
           echo "changed=true" >> $GITHUB_OUTPUT
         else
           echo "changed=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Verify changed packages and versions exist on PyPI
-      if: steps.check-both-files.outputs.changed == 'true' || steps.check-other-files.outputs.changed == 'true'
-      id: verify-pypi-packages
-      run: |
-        # Get changed requirements
-        changed_reqs=$(git diff --unified=0 ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-                      grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
-        
-        if [ -z "$changed_reqs" ]; then
-          echo "No requirement changes detected"
-          echo "valid=true" >> $GITHUB_OUTPUT
-          exit 0
-        fi
-
-        echo "Changed requirements:"
-        echo "$changed_reqs"
-        
-        # Install pip and necessary tools
-        python -m pip install --upgrade pip
-        python -m pip install packaging
-
-        invalid_packages=""
-        valid=true
-        
-        for req in $changed_reqs; do
-          # Clean up requirement string
-          clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
-          
-          echo "Checking requirement: $clean_req"
-          if ! pip install --dry-run "$clean_req" &>/dev/null; then
-            echo "::error::Requirement not satisfiable: $clean_req"
-            invalid_packages+=" $clean_req"
-            valid=false
-          fi
-        done
-
-        if [ "$valid" = false ]; then
-          echo "Invalid requirements found:$invalid_packages"
-          echo "valid=false" >> $GITHUB_OUTPUT
-          exit 1
-        else
-          echo "All requirements are valid and available on PyPI"
-          echo "valid=true" >> $GITHUB_OUTPUT
         fi
 
     - name: Notify about pending release
@@ -143,12 +97,72 @@ jobs:
             });
           }
 
-  create-release:
+  verify-requirements:
     needs: track-changes
+    if: |
+      (needs.track-changes.outputs.both-files-changed == 'true' ||
+       needs.track-changes.outputs.other-files-changed == 'true') &&
+      github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    outputs:
+      valid-requirements: ${{ steps.verify-pypi-packages.outputs.valid }}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Verify package requirements
+      id: verify-pypi-packages
+      run: |
+        # Get changed requirements
+        changed_reqs=$(git diff --unified=0 ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
+                      grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
+        
+        if [ -z "$changed_reqs" ]; then
+          echo "No requirement changes detected"
+          echo "valid=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Changed requirements:"
+        echo "$changed_reqs"
+        
+        # Install pip and necessary tools
+        python -m pip install --upgrade pip
+        python -m pip install packaging
+
+        invalid_packages=""
+        valid=true
+        
+        for req in $changed_reqs; do
+          # Clean up requirement string
+          clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          
+          echo "Checking requirement: $clean_req"
+          if ! pip install --dry-run "$clean_req" &>/dev/null; then
+            echo "::error::Requirement not satisfiable: $clean_req"
+            invalid_packages+=" $clean_req"
+            valid=false
+          fi
+        done
+
+        if [ "$valid" = false ]; then
+          echo "Invalid requirements found:$invalid_packages"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "All requirements are valid and available on PyPI"
+          echo "valid=true" >> $GITHUB_OUTPUT
+        fi
+
+  create-release:
+    needs: [track-changes, verify-requirements]
     if: |
       github.event.pull_request.merged == true &&
       needs.track-changes.outputs.both-files-changed == 'true' &&
-      needs.track-changes.outputs.valid-requirements == 'true'
+      needs.verify-requirements.outputs.valid-requirements == 'true'
     runs-on: ubuntu-latest
     
     steps:
