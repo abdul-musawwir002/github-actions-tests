@@ -52,8 +52,15 @@ jobs:
       uses: actions/github-script@v6
       with:
         script: |
-          const version = fs.existsSync('version.json') ? 
-            JSON.parse(fs.readFileSync('version.json')).version : 'unknown';
+          const fs = require('fs');
+          let version = 'unknown';
+          try {
+            if (fs.existsSync('version.json')) {
+              version = JSON.parse(fs.readFileSync('version.json')).version;
+            }
+          } catch (error) {
+            console.log('Error reading version.json:', error.message);
+          }
           
           let message = "📌 Release pending";
           if (version !== 'unknown') {
