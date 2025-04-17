@@ -14,9 +14,8 @@ jobs:
   check-changes:
     runs-on: ubuntu-latest
     outputs:
-      version-changed: ${{ steps.check-version.outputs.changed }}
-      requirements-changed: ${{ steps.check-requirements.outputs.changed }}
-      code-changed: ${{ steps.check-code.outputs.changed }}
+      both-files-changed: ${{ steps.check-both-files.outputs.changed }}
+      other-files-changed: ${{ steps.check-other-files.outputs.changed }}
       pr-open: ${{ github.event.action == 'opened' || github.event.action == 'reopened' }}
     
     steps:
@@ -25,39 +24,32 @@ jobs:
       with:
         fetch-depth: 0
 
-    - name: Check for version.json changes
-      id: check-version
+    - name: Check for both version.json and requirements.txt changes
+      id: check-both-files
       run: |
-        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'version.json'; then
-          echo "Version file changed"
+        version_changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'version.json' && echo "true" || echo "false")
+        requirements_changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt' && echo "true" || echo "false")
+        
+        if [[ "$version_changed" == "true" && "$requirements_changed" == "true" ]]; then
+          echo "Both files changed"
           echo "changed=true" >> $GITHUB_OUTPUT
         else
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Check for requirements.txt changes
-      id: check-requirements
-      run: |
-        if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt'; then
-          echo "Requirements file changed"
-          echo "changed=true" >> $GITHUB_OUTPUT
-        else
-          echo "changed=false" >> $GITHUB_OUTPUT
-        fi
-
-    - name: Check for code changes (excluding version and requirements)
-      id: check-code
+    - name: Check for other file changes
+      id: check-other-files
       run: |
         changed_files=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -v -E 'version.json|requirements.txt')
         if [ -n "$changed_files" ]; then
-          echo "Code files changed"
+          echo "Other files changed"
           echo "changed=true" >> $GITHUB_OUTPUT
         else
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Comment on PR about requirements
-      if: ${{ (steps.check-code.outputs.changed == 'true') && (github.event.action == 'opened' || github.event.action == 'reopened') }}
+    - name: Request requirements input for code changes
+      if: ${{ (steps.check-other-files.outputs.changed == 'true') && (github.event.action == 'opened' || github.event.action == 'reopened') }}
       uses: actions/github-script@v6
       with:
         script: |
@@ -65,12 +57,12 @@ jobs:
             issue_number: context.issue.number,
             owner: context.repo.owner,
             repo: context.repo.repo,
-            body: "⚠️ Code changes detected. Please confirm if any new dependencies were added that should be included in requirements.txt:\n\n- [ ] Yes, requirements were added\n- [ ] No, requirements were not changed"
+            body: "⚠️ Code changes detected without version/requirements updates. Please provide details of any new dependencies added:\n\n<details>\n<summary>Click to add requirements</summary>\n\n```\n# Paste new requirements here\n```\n</details>\n\nReply to this comment with your additions."
           })
 
   create-release:
     needs: check-changes
-    if: ${{ (needs.check-changes.outputs.version-changed == 'true' || needs.check-changes.outputs.requirements-changed == 'true') && github.event.action != 'closed' }}
+    if: ${{ needs.check-changes.outputs.both-files-changed == 'true' && github.event.action != 'closed' }}
     runs-on: ubuntu-latest
     
     steps:
@@ -90,8 +82,7 @@ jobs:
         name: Release v${{ steps.version.outputs.version }}
         body: |
           ### Changes in this release
-          - Version updated: ${{ needs.check-changes.outputs.version-changed == 'true' && 'Yes' || 'No' }}
-          - Requirements updated: ${{ needs.check-changes.outputs.requirements-changed == 'true' && 'Yes' || 'No' }}
+          - Version and requirements both updated
           
           Check the pull request for details: ${{ github.event.pull_request.html_url }}
         draft: false
