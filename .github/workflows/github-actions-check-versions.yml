@@ -20,6 +20,7 @@ jobs:
       both-files-changed: ${{ steps.check-both-files.outputs.changed }}
       other-files-changed: ${{ steps.check-other-files.outputs.changed }}
       pending-release: ${{ steps.check-both-files.outputs.changed && !github.event.pull_request.merged }}
+      valid-requirements: ${{ steps.verify-pypi-packages.outputs.valid }}
     
     steps:
     - name: Checkout repository
@@ -51,12 +52,68 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
+    - name: Verify changed packages and versions exist on PyPI
+      if: steps.check-both-files.outputs.changed == 'true' || steps.check-other-files.outputs.changed == 'true'
+      id: verify-pypi-packages
+      run: |
+        # Get changed requirements
+        changed_reqs=$(git diff --unified=0 ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
+                      grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
+        
+        if [ -z "$changed_reqs" ]; then
+          echo "No requirement changes detected"
+          echo "valid=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+
+        echo "Changed requirements:"
+        echo "$changed_reqs"
+        
+        # Install pip and necessary tools
+        python -m pip install --upgrade pip
+        python -m pip install packaging
+
+        invalid_packages=""
+        valid=true
+        
+        for req in $changed_reqs; do
+          # Extract pure package name (without extras/versions)
+          pkg=$(echo "$req" | sed -E 's/[[:space:]]*([^<>=!~;]+).*/\1/' | cut -d'[' -f1)
+          
+          # Check if version is specified
+          if [[ "$req" =~ [<>=~!]= ]]; then
+            # Use pip install --dry-run with the exact requirement
+            echo "Checking exact requirement: $req"
+            if ! pip install --dry-run "$req" &>/dev/null; then
+              echo "::error::Requirement not satisfiable: $req"
+              invalid_packages+=" $req"
+              valid=false
+            fi
+          else
+            # Just check package exists
+            echo "Checking package existence: $pkg"
+            if ! pip download --no-deps --dry-run "$pkg" &>/dev/null; then
+              echo "::error::Package not found on PyPI: $pkg"
+              invalid_packages+=" $pkg"
+              valid=false
+            fi
+          fi
+        done
+
+        if [ "$valid" = false ]; then
+          echo "Invalid requirements found:$invalid_packages"
+          echo "valid=false" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "All requirements are valid and available on PyPI"
+          echo "valid=true" >> $GITHUB_OUTPUT
+        fi
+
     - name: Notify about pending release
       if: steps.check-both-files.outputs.changed == 'true' && github.event.pull_request.merged != true
       uses: actions/github-script@v6
       with:
         script: |
-          // First read the version from version.json
           const fs = require('fs');
           const version = JSON.parse(fs.readFileSync('version.json')).version;
           
@@ -75,7 +132,6 @@ jobs:
       uses: actions/github-script@v6
       with:
         script: |
-          // Check if we already posted this comment
           const { data: comments } = await github.rest.issues.listComments({
             owner: context.repo.owner,
             repo: context.repo.repo,
@@ -103,7 +159,8 @@ jobs:
     needs: track-changes
     if: |
       github.event.pull_request.merged == true &&
-      needs.track-changes.outputs.both-files-changed == 'true'
+      needs.track-changes.outputs.both-files-changed == 'true' &&
+      needs.track-changes.outputs.valid-requirements == 'true'
     runs-on: ubuntu-latest
     
     steps:
