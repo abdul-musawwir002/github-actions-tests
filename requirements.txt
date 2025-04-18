@@ -59,7 +59,7 @@ PyYAML==6.0.2
 referencing==0.33.0
 requests==2.31.0
 rpds-py==0.18.0
-rsa==4.9
+rsa==4.8
 service-identity==24.1.0
 simplejson==3.19.2
 six==1.16.0
