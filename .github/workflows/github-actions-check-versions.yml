@@ -172,27 +172,6 @@ jobs:
         fi
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-    - name: Delete previous alpha release if exists
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        TAG="v${{ steps.version.outputs.version }}-alpha"
-        gh release delete "$TAG" --yes || echo "No previous release"
-        git push origin --delete "$TAG" || echo "No previous tag"
-
-    - name: Create new alpha GitHub release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v${{ steps.version.outputs.version }}-alpha
-        name: Alpha v${{ steps.version.outputs.version }}
-        body: |
-          ⚙️ Alpha release triggered by PR #${{ github.event.pull_request.number }}
-          This is an automated pre-release.
-        draft: false
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
     - name: Authenticate with Release API
       id: login
       run: |
@@ -234,6 +213,27 @@ jobs:
         fi
 
         echo "release_id=$release_id" >> $GITHUB_OUTPUT
+
+    - name: Delete previous alpha release if exists
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG="v${{ steps.version.outputs.version }}-alpha"
+        gh release delete "$TAG" --yes || echo "No previous release"
+        git push origin --delete "$TAG" || echo "No previous tag"
+
+    - name: Create new alpha GitHub release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}-alpha
+        name: Alpha v${{ steps.version.outputs.version }}
+        body: |
+          ⚙️ Alpha release triggered by PR #${{ github.event.pull_request.number }}
+          This is an automated pre-release.
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Call Alpha Test Validation API
       id: call-alpha-api
