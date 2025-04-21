@@ -215,7 +215,7 @@ jobs:
       run: |
         echo "Creating release record in external system..."
         response=$(curl -s -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
-          -H "Authorization: Token ${{ steps.login.outputs.token }}" \
+          -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
           -d '{"version_number": "${{ steps.version.outputs.version }}", "desciption": "Alpha release for version ${{ steps.version.outputs.version }}"}')
 
