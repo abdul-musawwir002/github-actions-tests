@@ -143,6 +143,94 @@ jobs:
           echo "valid=true" >> $GITHUB_OUTPUT
         fi
 
+  alpha-release:
+    needs: [track-changes, verify-requirements]
+    if: |
+      github.event.pull_request.merged != true &&
+      (needs.track-changes.outputs.version-changed == 'true' || 
+       needs.track-changes.outputs.requirements-changed == 'true') &&
+      (needs.track-changes.outputs.requirements-changed == 'false' || 
+       needs.verify-requirements.outputs.valid-requirements == 'true')
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Get version from version.json
+      id: version
+      run: |
+        if [ -f "version.json" ]; then
+          VERSION=$(jq -r '.version' version.json)
+        else
+          VERSION="0.0.0"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+    - name: Delete previous alpha release (if exists)
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG="v${{ steps.version.outputs.version }}-alpha"
+        echo "Deleting release/tag: $TAG"
+        gh release delete "$TAG" --yes || echo "No previous release"
+        git push origin --delete "$TAG" || echo "No previous tag"
+
+    - name: Create new alpha release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ steps.version.outputs.version }}-alpha
+        name: Alpha v${{ steps.version.outputs.version }}
+        body: |
+          ⚙️ Alpha release triggered by PR #${{ github.event.pull_request.number }}
+          This is an automated pre-release.
+        draft: false
+        prerelease: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Call Alpha Test Validation API
+      id: call-alpha-api
+      run: |
+        echo "Calling alpha test validation API..."
+        response=$(curl -s -w "%{http_code}" -o result.json -X POST "https://example.com/api/test-alpha" \
+          -H "Content-Type: application/json" \
+          -d '{"version": "${{ steps.version.outputs.version }}"}')
+
+        echo "API response code: $response"
+        cat result.json
+        if [ "$response" != "200" ]; then
+          echo "::error::Alpha validation API failed with status $response"
+          exit 1
+        fi
+
+        PASSED=$(jq -r '.passed' result.json)
+        if [ "$PASSED" != "true" ]; then
+          echo "::error::Alpha tests did not pass"
+          exit 1
+        fi
+
+        echo "Alpha test passed."
+
+    - name: Promote to Beta via API and create beta release
+      run: |
+        echo "Calling beta promotion API..."
+        curl -s -X POST "https://example.com/api/promote-beta" \
+          -H "Content-Type: application/json" \
+          -d '{"version": "${{ steps.version.outputs.version }}"}'
+
+        echo "Creating beta release..."
+        gh release delete "v${{ steps.version.outputs.version }}-beta" --yes || true
+        git push origin --delete "v${{ steps.version.outputs.version }}-beta" || true
+
+        gh release create "v${{ steps.version.outputs.version }}-beta" \
+          --title "Beta v${{ steps.version.outputs.version }}" \
+          --notes "🚀 Beta release promoted from alpha." \
+          --prerelease
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
   create-release:
     needs: [track-changes, verify-requirements]
     if: |
