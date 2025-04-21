@@ -153,9 +153,9 @@ jobs:
     if: |
       github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
-       needs.track-changes.outputs.requirements-changed == 'true') &&
+      needs.track-changes.outputs.requirements-changed == 'true') &&
       (needs.track-changes.outputs.requirements-changed == 'false' || 
-       needs.verify-requirements.outputs.valid-requirements == 'true')
+      needs.verify-requirements.outputs.valid-requirements == 'true')
     runs-on: ubuntu-latest
 
     steps:
@@ -214,24 +214,31 @@ jobs:
       id: create-release
       run: |
         echo "Creating release record in external system..."
-        response=$(curl -s -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
+        response=$(curl -s -w "%{http_code}" -o tmp_response.json -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
           -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
           -d '{"version_number": "${{ steps.version.outputs.version }}", "desciption": "Alpha release for version ${{ steps.version.outputs.version }}"}')
 
-        release_id=$(echo "$response" | jq -r '.id')
-        if [ "$release_id" == "null" ] || [ -z "$release_id" ]; then
-          echo "::error::Failed to create release in external system"
-          echo "Response: $response"
+        status_code=$(tail -n1 <<< "$response")
+        if [ "$status_code" != "200" ] && [ "$status_code" != "201" ]; then
+          echo "::error::Failed to create release. Status: $status_code"
+          cat tmp_response.json
           exit 1
         fi
+
+        release_id=$(jq -r '.id' tmp_response.json)
+        if [ "$release_id" == "null" ] || [ -z "$release_id" ]; then
+          echo "::error::Release ID not returned"
+          cat tmp_response.json
+          exit 1
+        fi
+
         echo "release_id=$release_id" >> $GITHUB_OUTPUT
 
     - name: Call Alpha Test Validation API
       id: call-alpha-api
       run: |
         echo "Simulating Alpha test validation..."
-        # Simulated response for success
         echo '{"passed": true}' > result.json
 
         PASSED=$(jq -r '.passed' result.json)
@@ -244,16 +251,32 @@ jobs:
     - name: Patch alpha test passed status
       run: |
         echo "Patching alpha test result..."
-        curl -s -X PATCH "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/passed_alpha_test/${{ steps.create-release.outputs.release_id }}/" \
-          -H "Authorization: Token ${{ steps.login.outputs.token }}" \
+        response=$(curl -s -w "%{http_code}" -o patch_response.json -X PATCH "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/passed_alpha_test/${{ steps.create-release.outputs.release_id }}/" \
+          -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
-          -d '{"is_alpha_test_passed": true}'
+          -d '{"is_alpha_test_passed": true}')
+
+        status_code=$(tail -n1 <<< "$response")
+        if [ "$status_code" != "200" ]; then
+          echo "::error::Failed to patch alpha status. Status: $status_code"
+          cat patch_response.json
+          exit 1
+        fi
 
     - name: Promote to beta
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         echo "Promoting release to beta..."
-        curl -s -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/promote/${{ steps.create-release.outputs.release_id }}/" \
-          -H "Authorization: Token ${{ steps.login.outputs.token }}"
+        response=$(curl -s -w "%{http_code}" -o promote_response.json -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/promote/${{ steps.create-release.outputs.release_id }}/" \
+          -H "Authorization: Bearer ${{ steps.login.outputs.token }}")
+
+        status_code=$(tail -n1 <<< "$response")
+        if [ "$status_code" != "200" ]; then
+          echo "::error::Failed to promote to beta. Status: $status_code"
+          cat promote_response.json
+          exit 1
+        fi
 
         echo "Creating beta GitHub release..."
         gh release delete "v${{ steps.version.outputs.version }}-beta" --yes || true
