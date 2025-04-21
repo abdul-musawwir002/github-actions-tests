@@ -222,6 +222,14 @@ jobs:
         gh release delete "$TAG" --yes || echo "No previous release"
         git push origin --delete "$TAG" || echo "No previous tag"
 
+    - name: Update alpha tag to latest commit
+      run: |
+        TAG="v${{ steps.version.outputs.version }}-alpha"
+        git tag -d "$TAG" 2>/dev/null || echo "Local tag doesn't exist"
+        git push origin --delete "$TAG" 2>/dev/null || echo "Remote tag doesn't exist"
+        git tag "$TAG"
+        git push origin "$TAG"
+
     - name: Create new alpha GitHub release
       uses: softprops/action-gh-release@v1
       with:
@@ -289,6 +297,16 @@ jobs:
         else
           echo "No existing beta tag"
         fi
+
+        TAG="v${{ steps.version.outputs.version }}-beta"
+
+        # Delete existing tag
+        git tag -d "$TAG" 2>/dev/null || true
+        git push origin --delete "$TAG" 2>/dev/null || true
+
+        # Recreate tag pointing to current commit
+        git tag "$TAG"
+        git push origin "$TAG"
 
         # Create new beta release
         gh release create "v${{ steps.version.outputs.version }}-beta" \
