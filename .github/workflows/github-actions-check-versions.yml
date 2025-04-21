@@ -268,7 +268,7 @@ jobs:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         echo "Promoting release to beta..."
-        response=$(curl -s -w "%{http_code}" -o promote_response.json -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/promote/${{ steps.create-release.outputs.release_id }}/" \
+        response=$(curl -s -w "%{http_code}" -o promote_response.json -X PATCH "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/promote/${{ steps.create-release.outputs.release_id }}/" \
           -H "Authorization: Bearer ${{ steps.login.outputs.token }}")
 
         status_code=$(tail -n1 <<< "$response")
