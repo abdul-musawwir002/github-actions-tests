@@ -279,13 +279,23 @@ jobs:
         fi
 
         echo "Creating beta GitHub release..."
-        gh release delete "v${{ steps.version.outputs.version }}-beta" --yes || echo "No existing beta release"
-        git push origin --delete "v${{ steps.version.outputs.version }}-beta" || echo "No existing beta tag"
 
+        # Attempt to delete beta release if exists
+        gh release delete "v${{ steps.version.outputs.version }}-beta" --yes || echo "No existing beta release"
+
+        # Attempt to delete beta tag only if it exists
+        if git rev-parse "refs/tags/v${{ steps.version.outputs.version }}-beta" >/dev/null 2>&1; then
+          git push origin --delete "v${{ steps.version.outputs.version }}-beta"
+        else
+          echo "No existing beta tag"
+        fi
+
+        # Create new beta release
         gh release create "v${{ steps.version.outputs.version }}-beta" \
           --title "Beta v${{ steps.version.outputs.version }}" \
           --notes "✅ Beta release promoted after alpha test pass." \
           --prerelease
+
 
 
   create-release:
