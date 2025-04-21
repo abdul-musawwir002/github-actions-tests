@@ -286,8 +286,6 @@ jobs:
           --title "Beta v${{ steps.version.outputs.version }}" \
           --notes "✅ Beta release promoted after alpha test pass." \
           --prerelease
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 
   create-release:
