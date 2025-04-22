@@ -7,7 +7,7 @@ asgiref==3.7.2
 attrs==23.2.0
 autobahn==23.1.2
 Automat==22.10.0
-azure-core==1.29.6
+azure-core==1.29.5
 azure-storage-blob==12.19.0
 certifi==2023.11.17
 cffi==1.16.0
