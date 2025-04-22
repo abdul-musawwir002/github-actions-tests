@@ -31,7 +31,6 @@ jobs:
       id: check-version
       run: |
         if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'version.json'; then
-          echo "Version file changed"
           echo "changed=true" >> $GITHUB_OUTPUT
         else
           echo "changed=false" >> $GITHUB_OUTPUT
@@ -41,7 +40,6 @@ jobs:
       id: check-requirements
       run: |
         if git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt'; then
-          echo "Requirements file changed"
           echo "changed=true" >> $GITHUB_OUTPUT
         else
           echo "changed=false" >> $GITHUB_OUTPUT
@@ -61,13 +59,12 @@ jobs:
           } catch (error) {
             console.log('Error reading version.json:', error.message);
           }
-          
+
           let message = "📌 Release pending";
           if (version !== 'unknown') {
             message += ` (v${version})`;
           }
           message += ": ";
-          
           if ("${{ steps.check-version.outputs.changed }}" === "true") {
             message += "version.json was modified. ";
           }
@@ -91,6 +88,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       valid-requirements: ${{ steps.verify-pypi-packages.outputs.valid }}
+      added-packages: ${{ steps.verify-pypi-packages.outputs.added }}
     
     steps:
     - name: Checkout repository
@@ -101,24 +99,20 @@ jobs:
     - name: Verify package requirements
       id: verify-pypi-packages
       run: |
-        echo "Checking if requirements.txt was changed..."
-
         changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt' && echo "yes" || echo "no")
 
         if [ "$changed" = "no" ]; then
-          echo "requirements.txt was not changed"
           echo "valid=true" >> $GITHUB_OUTPUT
+          echo "added=" >> $GITHUB_OUTPUT
           exit 0
         fi
 
-        echo "requirements.txt was changed, validating..."
-
         changed_reqs=$(git diff --unified=0 ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-                      grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
+          grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
 
         if [ -z "$changed_reqs" ]; then
-          echo "No actionable requirement changes detected"
           echo "valid=true" >> $GITHUB_OUTPUT
+          echo "added=" >> $GITHUB_OUTPUT
           exit 0
         fi
 
@@ -130,8 +124,6 @@ jobs:
 
         for req in $changed_reqs; do
           clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
-          echo "Checking requirement: $clean_req"
-
           if ! pip install --dry-run "$clean_req" &>/dev/null; then
             echo "::error::Requirement not satisfiable: $clean_req"
             invalid_packages+=" $clean_req"
@@ -140,15 +132,16 @@ jobs:
         done
 
         if [ "$valid" = false ]; then
-          echo "Invalid requirements:$invalid_packages"
           echo "valid=false" >> $GITHUB_OUTPUT
+          echo "added=" >> $GITHUB_OUTPUT
           exit 1
         else
-          echo "All requirements are valid"
           echo "valid=true" >> $GITHUB_OUTPUT
+          # Escape newlines for JSON serialization
+          echo "added=$(echo "$changed_reqs" | paste -sd ',' -)" >> $GITHUB_OUTPUT
         fi
 
-  alpha-release:
+  alpha-beta-release:
     needs: [track-changes, verify-requirements]
     if: |
       github.event.pull_request.merged != true &&
@@ -162,20 +155,15 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Get version from version.json
+    - name: Get version
       id: version
       run: |
-        if [ -f "version.json" ]; then
-          VERSION=$(jq -r '.version' version.json)
-        else
-          VERSION="0.0.0"
-        fi
+        VERSION=$(jq -r '.version' version.json)
         echo "version=$VERSION" >> $GITHUB_OUTPUT
 
     - name: Authenticate with Release API
       id: login
       run: |
-        echo "Authenticating..."
         response=$(curl -s -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/auth/login/" \
           -H "Content-Type: application/json" \
           -d '{"username": "${{ secrets.RELEASE_API_USER }}", "password": "${{ secrets.RELEASE_API_PASS }}"}')
@@ -185,7 +173,6 @@ jobs:
           echo "::error::Failed to authenticate with Release API"
           exit 1
         fi
-
         echo "::add-mask::$token"
         echo "token=$token" >> $GITHUB_OUTPUT
 
@@ -193,10 +180,21 @@ jobs:
       id: create-release
       run: |
         echo "Creating release record in external system..."
+        desc="Alpha release for version ${{ steps.version.outputs.version }}"
+        deps="${{ needs.verify-requirements.outputs.added }}"
+        commit="${GITHUB_SHA}"
+
+        json_body=$(jq -n \
+          --arg ver "${{ steps.version.outputs.version }}" \
+          --arg desc "$desc" \
+          --arg deps "$deps" \
+          --arg commit "$commit" \
+          '{version_number: $ver, description: $desc, dependencies: ($deps | split(",")), commit_hash: $commit}')
+
         response=$(curl -s -w "%{http_code}" -o tmp_response.json -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
           -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
-          -d '{"version_number": "${{ steps.version.outputs.version }}", "desciption": "Alpha release for version ${{ steps.version.outputs.version }}"}')
+          -d "$json_body")
 
         status_code=$(tail -n1 <<< "$response")
         if [ "$status_code" != "200" ] && [ "$status_code" != "201" ]; then
@@ -238,6 +236,9 @@ jobs:
         body: |
           ⚙️ Alpha release triggered by PR #${{ github.event.pull_request.number }}
           This is an automated pre-release.
+
+          ${{ steps.extract-deps.outputs.deps_list && '### 📦 Dependencies added/changed:' || '' }}
+          ${{ steps.extract-deps.outputs.deps_list }}
         draft: false
         prerelease: true
       env:

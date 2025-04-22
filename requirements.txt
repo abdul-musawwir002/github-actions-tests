@@ -52,7 +52,7 @@ pycparser==2.21
 pymongo==4.6.2
 pyOpenSSL==24.0.0
 python-jose==3.3.0
-python-json-logger==2.0.7
+python-json-logger==2.0.6
 python-snappy==0.6.1
 pytz==2023.3.post1
 PyYAML==6.0.2
