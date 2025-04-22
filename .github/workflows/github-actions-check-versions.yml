@@ -183,7 +183,7 @@ jobs:
       run: |
         echo "Creating release record in external system..."
         desc="Alpha release for version ${{ steps.version.outputs.version }}"
-        deps="${{ needs.verify-requirements.outputs.added }}"
+        deps="${{ needs.verify-requirements.outputs.added-packages }}"
         commit="${GITHUB_SHA}"
         echo "depe = $deps"
         json_body=$(jq -n \
