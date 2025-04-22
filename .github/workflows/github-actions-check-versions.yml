@@ -140,8 +140,7 @@ jobs:
         else
           echo "valid=true" >> $GITHUB_OUTPUT
           # Remove trailing comma and escape for output
-          added_packages=${added_packages%?}
-          echo "added=${added_packages}" >> $GITHUB_OUTPUT
+          echo "added=${changed_reqs}" >> $GITHUB_OUTPUT
         fi
 
   alpha-beta-release:
