@@ -183,7 +183,7 @@ jobs:
         desc="Alpha release for version ${{ steps.version.outputs.version }}"
         deps="${{ needs.verify-requirements.outputs.added }}"
         commit="${GITHUB_SHA}"
-
+        echo "depe = $deps"
         json_body=$(jq -n \
           --arg ver "${{ steps.version.outputs.version }}" \
           --arg desc "$desc" \
