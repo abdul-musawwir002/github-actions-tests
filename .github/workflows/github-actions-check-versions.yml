@@ -140,7 +140,8 @@ jobs:
         else
           echo "valid=true" >> $GITHUB_OUTPUT
           # Remove trailing comma and escape for output
-          echo "added=${changed_reqs}" >> $GITHUB_OUTPUT
+          formatted_reqs=$(echo "$changed_reqs" | tr '\n' ',' | sed 's/,$//')
+          echo "added=${formatted_reqs}" >> $GITHUB_OUTPUT
         fi
 
   alpha-beta-release:
@@ -183,17 +184,40 @@ jobs:
       run: |
         echo "Creating release record in external system..."
         desc="Alpha release for version ${{ steps.version.outputs.version }}"
+        
+        # Get the dependencies and convert to proper JSON array
         deps="${{ needs.verify-requirements.outputs.added-packages }}"
         commit="${GITHUB_SHA}"
-        echo "depe = $deps"
+        
+        # Create properly formatted dependencies array
+        if [ -n "$deps" ]; then
+          deps_json=$(echo "$deps" | jq -R 'split(",") | map(select(. != ""))')
+        else
+          deps_json="[]"
+        fi
+        
+        echo "Dependencies being sent:"
+        echo "$deps_json"
+        
+        # Create the complete JSON payload
         json_body=$(jq -n \
           --arg ver "${{ steps.version.outputs.version }}" \
           --arg desc "$desc" \
-          --arg deps "$deps" \
           --arg commit "$commit" \
-          '{version_number: $ver, description: $desc, dependencies: ($deps | split(",")), commit_hash: $commit}')
-
-        response=$(curl -s -w "%{http_code}" -o tmp_response.json -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
+          --argjson deps "$deps_json" \
+          '{
+            version_number: $ver,
+            description: $desc,
+            dependencies: $deps,
+            commit_hash: $commit
+          }')
+        
+        echo "Full JSON payload:"
+        echo "$json_body"
+        
+        # Send to external API
+        response=$(curl -s -w "%{http_code}" -o tmp_response.json \
+          -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
           -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
           -d "$json_body")
