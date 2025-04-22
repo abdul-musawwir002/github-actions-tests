@@ -99,35 +99,37 @@ jobs:
     - name: Verify package requirements
       id: verify-pypi-packages
       run: |
-        # changed=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} | grep -q 'requirements.txt' && echo "yes" || echo "no")
-
-        # if [ "$changed" = "no" ]; then
-        #   echo "valid=true" >> $GITHUB_OUTPUT
-        #   echo "added=" >> $GITHUB_OUTPUT
-        #   exit 0
-        # fi
-
-        changed_reqs=$(git diff --unified=0 ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-          grep -E '^\+[^+]' | sed 's/^\+//' | grep -v '^#')
+        # Get the actual diff content of requirements.txt
+        changed_reqs=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
+          grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -v '^#')
 
         if [ -z "$changed_reqs" ]; then
+          echo "No requirement changes detected"
           echo "valid=true" >> $GITHUB_OUTPUT
           echo "added=" >> $GITHUB_OUTPUT
           exit 0
         fi
+
+        echo "Changed requirements:"
+        echo "$changed_reqs"
 
         python -m pip install --upgrade pip
         python -m pip install packaging
 
         invalid_packages=""
         valid=true
+        added_packages=""
 
         for req in $changed_reqs; do
           clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
-          if ! pip install --dry-run "$clean_req" &>/dev/null; then
-            echo "::error::Requirement not satisfiable: $clean_req"
-            invalid_packages+=" $clean_req"
-            valid=false
+          if [ -n "$clean_req" ]; then
+            if ! pip install --dry-run "$clean_req" &>/dev/null; then
+              echo "::error::Requirement not satisfiable: $clean_req"
+              invalid_packages+=" $clean_req"
+              valid=false
+            else
+              added_packages+="$clean_req,"
+            fi
           fi
         done
 
@@ -137,8 +139,9 @@ jobs:
           exit 1
         else
           echo "valid=true" >> $GITHUB_OUTPUT
-          # Escape newlines for JSON serialization
-          echo "added=$(echo "$changed_reqs" | paste -sd ',' -)" >> $GITHUB_OUTPUT
+          # Remove trailing comma and escape for output
+          added_packages=${added_packages%?}
+          echo "added=${added_packages}" >> $GITHUB_OUTPUT
         fi
 
   alpha-beta-release:
