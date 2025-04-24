@@ -99,7 +99,6 @@ jobs:
     - name: Verify package requirements
       id: verify-pypi-packages
       run: |
-        # Get the actual diff content of requirements.txt
         changed_reqs=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
           grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -v '^#')
 
