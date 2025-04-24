@@ -83,7 +83,6 @@ jobs:
   verify-requirements:
     needs: track-changes
     if: |
-      needs.track-changes.outputs.requirements-changed == 'true' &&
       github.event.action != 'closed' || 
       (github.event.action == 'closed' && github.event.pull_request.merged)
     runs-on: ubuntu-latest
@@ -101,8 +100,10 @@ jobs:
       id: verify-pypi-packages
       run: |
         # Get the actual diff content of requirements.txt
-        changed_reqs=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-          grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -v '^#')
+        diff_output=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt || true)
+
+        changed_reqs=$(echo "$diff_output" | grep '^+' || true | grep -v '^+++' || true | sed 's/^+//' | grep -v '^#' || true)
+
 
         if [ -z "$changed_reqs" ]; then
           echo "No requirement changes detected"
@@ -151,8 +152,11 @@ jobs:
       github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
       needs.track-changes.outputs.requirements-changed == 'true') &&
-      (needs.track-changes.outputs.requirements-changed == 'false' || 
-      needs.verify-requirements.outputs.valid-requirements == 'true')
+      (
+        needs.track-changes.outputs.requirements-changed != 'true' ||
+        (needs.verify-requirements.result == 'success' && needs.verify-requirements.outputs.valid-requirements == 'true')
+      )
+
     runs-on: ubuntu-latest
 
     steps:
