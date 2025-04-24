@@ -100,49 +100,51 @@ jobs:
       id: verify-pypi-packages
       run: |
         # Get the actual diff content of requirements.txt
-        # changed_reqs=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-        #   grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -v '^#')
+        diff_output=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt || true)
 
-        # if [ -z "$changed_reqs" ]; then
-        #   echo "No requirement changes detected"
-        #   echo "valid=true" >> $GITHUB_OUTPUT
-        #   echo "added=" >> $GITHUB_OUTPUT
-        #   exit 0
-        # fi
+        changed_reqs=$(echo "$diff_output" | grep '^+' || true | grep -v '^+++' || true | sed 's/^+//' | grep -v '^#' || true)
 
-        # echo "Changed requirements:"
-        # echo "$changed_reqs"
 
-        # python -m pip install --upgrade pip
-        # python -m pip install packaging
+        if [ -z "$changed_reqs" ]; then
+          echo "No requirement changes detected"
+          echo "valid=true" >> $GITHUB_OUTPUT
+          echo "added=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
 
-        # invalid_packages=""
-        # valid=true
-        # added_packages=""
+        echo "Changed requirements:"
+        echo "$changed_reqs"
 
-        # for req in $changed_reqs; do
-        #   clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
-        #   if [ -n "$clean_req" ]; then
-        #     if ! pip install --dry-run "$clean_req" &>/dev/null; then
-        #       echo "::error::Requirement not satisfiable: $clean_req"
-        #       invalid_packages+=" $clean_req"
-        #       valid=false
-        #     else
-        #       added_packages+="$clean_req,"
-        #     fi
-        #   fi
-        # done
+        python -m pip install --upgrade pip
+        python -m pip install packaging
 
-        # if [ "$valid" = false ]; then
-        #   echo "valid=false" >> $GITHUB_OUTPUT
-        #   echo "added=" >> $GITHUB_OUTPUT
-        #   exit 1
-        # else
-        #   echo "valid=true" >> $GITHUB_OUTPUT
-        #   # Remove trailing comma and escape for output
-        #   formatted_reqs=$(echo "$changed_reqs" | tr '\n' ',' | sed 's/,$//')
-        #   echo "added=${formatted_reqs}" >> $GITHUB_OUTPUT
-        # fi
+        invalid_packages=""
+        valid=true
+        added_packages=""
+
+        for req in $changed_reqs; do
+          clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
+          if [ -n "$clean_req" ]; then
+            if ! pip install --dry-run "$clean_req" &>/dev/null; then
+              echo "::error::Requirement not satisfiable: $clean_req"
+              invalid_packages+=" $clean_req"
+              valid=false
+            else
+              added_packages+="$clean_req,"
+            fi
+          fi
+        done
+
+        if [ "$valid" = false ]; then
+          echo "valid=false" >> $GITHUB_OUTPUT
+          echo "added=" >> $GITHUB_OUTPUT
+          exit 1
+        else
+          echo "valid=true" >> $GITHUB_OUTPUT
+          # Remove trailing comma and escape for output
+          formatted_reqs=$(echo "$changed_reqs" | tr '\n' ',' | sed 's/,$//')
+          echo "added=${formatted_reqs}" >> $GITHUB_OUTPUT
+        fi
 
   alpha-beta-release:
     needs: [track-changes, verify-requirements]
