@@ -151,8 +151,11 @@ jobs:
       github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
       needs.track-changes.outputs.requirements-changed == 'true') &&
-      (needs.track-changes.outputs.requirements-changed == 'false' || 
-      needs.verify-requirements.outputs.valid-requirements == 'true')
+      (
+        needs.track-changes.outputs.requirements-changed != 'true' ||
+        (needs.verify-requirements.result == 'success' && needs.verify-requirements.outputs.valid-requirements == 'true')
+      )
+
     runs-on: ubuntu-latest
 
     steps:
