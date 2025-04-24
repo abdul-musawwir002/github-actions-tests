@@ -83,7 +83,6 @@ jobs:
   verify-requirements:
     needs: track-changes
     if: |
-      needs.track-changes.outputs.requirements-changed == 'true' &&
       github.event.action != 'closed' || 
       (github.event.action == 'closed' && github.event.pull_request.merged)
     runs-on: ubuntu-latest
@@ -146,7 +145,7 @@ jobs:
         fi
 
   alpha-beta-release:
-    needs: [track-changes]
+    needs: [track-changes, verify-requirements]
     if: |
       github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
