@@ -146,7 +146,7 @@ jobs:
         fi
 
   alpha-beta-release:
-    needs: [track-changes, verify-requirements]
+    needs: [track-changes]
     if: |
       github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
