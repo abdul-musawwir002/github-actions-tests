@@ -184,17 +184,20 @@ jobs:
         echo "::add-mask::$token"
         echo "token=$token" >> $GITHUB_OUTPUT
 
-    - name: Create or update release in external system
+    - name: Create release in external system
       id: create-release
       run: |
-        echo "Creating or updating release record in external system..."
+        echo "Creating release record in external system..."
         desc="Alpha release for version ${{ steps.version.outputs.version }}"
+        
+        # Get the dependencies and convert to proper JSON array
         deps="${{ needs.verify-requirements.outputs.added-packages }}"
         commit="${GITHUB_SHA}"
         
         # Create properly formatted dependencies array
         if [ -n "$deps" ]; then
           deps_json=$(echo "$deps" | jq -R 'split(",") | map(select(. != ""))')
+          # If the resulting array is empty, treat it as null
           if [ "$(echo "$deps_json" | jq 'length')" -eq 0 ]; then
             deps_json="null"
           fi
@@ -220,31 +223,17 @@ jobs:
         
         echo "Full JSON payload:"
         echo "$json_body"
-
-        CREATE_URL="${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/"
-        EDIT_URL="${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/update_by_version/${{ steps.version.outputs.version }}/"
-
-        # Try to create the release
+        
+        # Send to external API
         response=$(curl -s -w "%{http_code}" -o tmp_response.json \
-          -X POST "$CREATE_URL" \
+          -X POST "${{ secrets.RELEASE_API_BASE_URL }}/core/api/v2/devices/releases/create/" \
           -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
           -H "Content-Type: application/json" \
           -d "$json_body")
 
         status_code=$(tail -n1 <<< "$response")
-
         if [ "$status_code" != "200" ] && [ "$status_code" != "201" ]; then
-          echo "Release already exists. Attempting to update it instead..."
-          response=$(curl -s -w "%{http_code}" -o tmp_response.json \
-            -X PATCH "$EDIT_URL" \
-            -H "Authorization: Bearer ${{ steps.login.outputs.token }}" \
-            -H "Content-Type: application/json" \
-            -d "$json_body")
-          status_code=$(tail -n1 <<< "$response")
-        fi
-
-        if [ "$status_code" != "200" ] && [ "$status_code" != "201" ]; then
-          echo "::error::Failed to create or update release. Status: $status_code"
+          echo "::error::Failed to create release. Status: $status_code"
           cat tmp_response.json
           exit 1
         fi
@@ -290,18 +279,18 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    - name: Call Alpha Test Validation API
-      id: call-alpha-api
+    - name: Run all unit tests and set pass flag
+      id: run tests
       run: |
-        echo "Simulating Alpha test validation..."
-        echo '{"passed": true}' > result.json
-
-        PASSED=$(jq -r '.passed' result.json)
-        if [ "$PASSED" != "true" ]; then
-          echo "::error::Alpha tests did not pass"
+        echo "Running all tests in tests/..."
+        if python -m unittest discover -s tests -p "*.py"; then
+          echo "passed=true" >> $GITHUB_OUTPUT
+        else
+          echo "::error::Unit tests failed"
+          echo "passed=false" >> $GITHUB_OUTPUT
           exit 1
         fi
-        echo "Alpha tests passed."
+
 
     - name: Patch alpha test passed status
       run: |
