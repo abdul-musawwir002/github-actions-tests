@@ -1,1 +1,27 @@
 
+requests
+opencv-python
+ffmpeg
+pyserial
+pynmea2
+python-socketio>=5.0.0
+av>=9.0.0
+aiortc
+aiohttp
+ultralytics==8.3.50
+onnxruntime==1.20.1
+psutil
+parameterized
+unittest2
+Pillow==8.4.0
+scikit-learn
+numpy
+requests_toolbelt
+scheduler
+persistqueue
+persist-queue[extra]
+blinker
+python-dateutil
+tensorflow==2.10.0
+python-socketio
+numpy==1.26.4
