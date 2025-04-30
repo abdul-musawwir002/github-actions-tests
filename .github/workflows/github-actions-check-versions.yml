@@ -68,8 +68,7 @@ jobs:
         # Get the actual diff content of requirements.txt
         diff_output=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt || true)
 
-        changed_reqs=$(echo "$diff_output" | grep '^+' || true | grep -v '^+++' || true | sed 's/^+//' | grep -v '^#' || true)
-
+        changed_reqs=$(echo "$diff_output" | grep '^+[^+]' | grep -v '^+++' | sed 's/^+//' | grep -v '^#' | grep -v '^[[:space:]]*$' | grep -v '^b/' || true)
 
         if [ -z "$changed_reqs" ]; then
           echo "No requirement changes detected"
@@ -88,7 +87,8 @@ jobs:
         valid=true
         added_packages=""
 
-        for req in $changed_reqs; do
+        # Process requirements line by line
+        while IFS= read -r req; do
           clean_req=$(echo "$req" | sed 's/^[ \t]*//;s/[ \t]*$//')
           if [ -n "$clean_req" ]; then
             if ! pip install --dry-run "$clean_req" &>/dev/null; then
@@ -99,7 +99,7 @@ jobs:
               added_packages+="$clean_req,"
             fi
           fi
-        done
+        done <<< "$changed_reqs"
 
         if [ "$valid" = false ]; then
           echo "valid=false" >> $GITHUB_OUTPUT
@@ -108,7 +108,7 @@ jobs:
         else
           echo "valid=true" >> $GITHUB_OUTPUT
           # Remove trailing comma and escape for output
-          formatted_reqs=$(echo "$changed_reqs" | tr '\n' ',' | sed 's/,$//')
+          formatted_reqs=$(echo "$added_packages" | sed 's/,$//')
           echo "added=${formatted_reqs}" >> $GITHUB_OUTPUT
         fi
 
