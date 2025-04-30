@@ -118,6 +118,8 @@ jobs:
       )
 
     runs-on: ubuntu-latest
+    outputs:
+      release-created: ${{ steps.create-release.outputs.release_created }}
 
     steps:
     - name: Checkout repository
@@ -206,6 +208,7 @@ jobs:
         fi
 
         echo "release_id=$release_id" >> $GITHUB_OUTPUT
+        echo "release_created=true" >> $GITHUB_OUTPUT
 
     - name: Run all unit tests and set pass flag
       id: run-tests
@@ -255,9 +258,10 @@ jobs:
 
 
   create-release:
-    needs: [track-changes, verify-requirements]
+    needs: [track-changes, verify-requirements, alpha-beta-release]
     if: |
       github.event.pull_request.merged == true &&
+      needs.alpha-beta-release.outputs.release-created &&
       (needs.track-changes.outputs.version-changed == 'true' || 
        needs.track-changes.outputs.requirements-changed == 'true') &&
       (needs.track-changes.outputs.requirements-changed == 'false' || 
