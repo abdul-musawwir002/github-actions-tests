@@ -2,9 +2,8 @@ name: Version and Dependency Management
 
 on:
   pull_request:
+    types: [closed]
     branches: [main]
-    types: [opened, synchronize, reopened, closed]
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -12,9 +11,7 @@ permissions:
 
 jobs:
   track-changes:
-    if: |
-      github.event.action != 'closed' ||
-      (github.event.action == 'closed' && github.event.pull_request.merged)
+    if: github.event.pull_request.merged
     runs-on: ubuntu-latest
     outputs:
       version-changed: ${{ steps.check-version.outputs.changed }}
@@ -45,47 +42,10 @@ jobs:
           echo "changed=false" >> $GITHUB_OUTPUT
         fi
 
-    - name: Notify about pending release
-      if: (steps.check-version.outputs.changed == 'true' || steps.check-requirements.outputs.changed == 'true') && github.event.pull_request.merged != true
-      uses: actions/github-script@v6
-      with:
-        script: |
-          const fs = require('fs');
-          let version = 'unknown';
-          try {
-            if (fs.existsSync('version.json')) {
-              version = JSON.parse(fs.readFileSync('version.json')).version;
-            }
-          } catch (error) {
-            console.log('Error reading version.json:', error.message);
-          }
-
-          let message = "📌 Release pending";
-          if (version !== 'unknown') {
-            message += ` (v${version})`;
-          }
-          message += ": ";
-          if ("${{ steps.check-version.outputs.changed }}" === "true") {
-            message += "version.json was modified. ";
-          }
-          if ("${{ steps.check-requirements.outputs.changed }}" === "true") {
-            message += "requirements.txt was modified. ";
-          }
-          message += "A release will be created automatically when this PR is merged.";
-          
-          await github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: message
-          });
 
   verify-requirements:
     needs: track-changes
-    if: |
-      needs.track-changes.outputs.requirements-changed == 'true' &&
-      github.event.action != 'closed' || 
-      (github.event.action == 'closed' && github.event.pull_request.merged)
+    if: github.event.pull_request.merged
     runs-on: ubuntu-latest
     outputs:
       valid-requirements: ${{ steps.verify-pypi-packages.outputs.valid }}
@@ -101,8 +61,10 @@ jobs:
       id: verify-pypi-packages
       run: |
         # Get the actual diff content of requirements.txt
-        changed_reqs=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt | \
-          grep '^+' | grep -v '^+++' | sed 's/^+//' | grep -v '^#')
+        diff_output=$(git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} -- requirements.txt || true)
+
+        changed_reqs=$(echo "$diff_output" | grep '^+' || true | grep -v '^+++' || true | sed 's/^+//' | grep -v '^#' || true)
+
 
         if [ -z "$changed_reqs" ]; then
           echo "No requirement changes detected"
@@ -148,11 +110,13 @@ jobs:
   alpha-beta-release:
     needs: [track-changes, verify-requirements]
     if: |
-      github.event.pull_request.merged != true &&
       (needs.track-changes.outputs.version-changed == 'true' || 
       needs.track-changes.outputs.requirements-changed == 'true') &&
-      (needs.track-changes.outputs.requirements-changed == 'false' || 
-      needs.verify-requirements.outputs.valid-requirements == 'true')
+      (
+        needs.track-changes.outputs.requirements-changed != 'true' ||
+        (needs.verify-requirements.result == 'success' && needs.verify-requirements.outputs.valid-requirements == 'true')
+      )
+
     runs-on: ubuntu-latest
 
     steps:
@@ -193,8 +157,12 @@ jobs:
         # Create properly formatted dependencies array
         if [ -n "$deps" ]; then
           deps_json=$(echo "$deps" | jq -R 'split(",") | map(select(. != ""))')
+          # If the resulting array is empty, treat it as null
+          if [ "$(echo "$deps_json" | jq 'length')" -eq 0 ]; then
+            deps_json="null"
+          fi
         else
-          deps_json="[]"
+          deps_json="null"
         fi
         
         echo "Dependencies being sent:"
@@ -239,50 +207,20 @@ jobs:
 
         echo "release_id=$release_id" >> $GITHUB_OUTPUT
 
-    - name: Delete previous alpha release if exists
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Run all unit tests and set pass flag
+      id: run-tests
       run: |
-        TAG="v${{ steps.version.outputs.version }}-alpha"
-        gh release delete "$TAG" --yes || echo "No previous release"
-        git push origin --delete "$TAG" || echo "No previous tag"
-
-    - name: Update alpha tag to latest commit
-      run: |
-        TAG="v${{ steps.version.outputs.version }}-alpha"
-        git tag -d "$TAG" 2>/dev/null || echo "Local tag doesn't exist"
-        git push origin --delete "$TAG" 2>/dev/null || echo "Remote tag doesn't exist"
-        git tag "$TAG"
-        git push origin "$TAG"
-
-    - name: Create new alpha GitHub release
-      uses: softprops/action-gh-release@v1
-      with:
-        tag_name: v${{ steps.version.outputs.version }}-alpha
-        name: Alpha v${{ steps.version.outputs.version }}
-        body: |
-          ⚙️ Alpha release triggered by PR #${{ github.event.pull_request.number }}
-          This is an automated pre-release.
-
-          ${{ steps.extract-deps.outputs.deps_list && '### 📦 Dependencies added/changed:' || '' }}
-          ${{ steps.extract-deps.outputs.deps_list }}
-        draft: false
-        prerelease: true
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-    - name: Call Alpha Test Validation API
-      id: call-alpha-api
-      run: |
-        echo "Simulating Alpha test validation..."
-        echo '{"passed": true}' > result.json
-
-        PASSED=$(jq -r '.passed' result.json)
-        if [ "$PASSED" != "true" ]; then
-          echo "::error::Alpha tests did not pass"
+        echo "Running all tests in tests/..."
+        if python -m unittest discover -s tests -p "*.py"; then
+          echo "passed=true" >> $GITHUB_OUTPUT
+          # continues to promotion if tests pass
+        else
+          echo "::error::Unit tests failed"
+          echo "passed=false" >> $GITHUB_OUTPUT
           exit 1
+          # exits if tests fail
         fi
-        echo "Alpha tests passed."
+
 
     - name: Patch alpha test passed status
       run: |
@@ -313,34 +251,6 @@ jobs:
           cat promote_response.json
           exit 1
         fi
-
-        echo "Creating beta GitHub release..."
-
-        # Attempt to delete beta release if exists
-        gh release delete "v${{ steps.version.outputs.version }}-beta" --yes || echo "No existing beta release"
-
-        # Attempt to delete beta tag only if it exists
-        if git rev-parse "refs/tags/v${{ steps.version.outputs.version }}-beta" >/dev/null 2>&1; then
-          git push origin --delete "v${{ steps.version.outputs.version }}-beta"
-        else
-          echo "No existing beta tag"
-        fi
-
-        TAG="v${{ steps.version.outputs.version }}-beta"
-
-        # Delete existing tag
-        git tag -d "$TAG" 2>/dev/null || true
-        git push origin --delete "$TAG" 2>/dev/null || true
-
-        # Recreate tag pointing to current commit
-        git tag "$TAG"
-        git push origin "$TAG"
-
-        # Create new beta release
-        gh release create "v${{ steps.version.outputs.version }}-beta" \
-          --title "Beta v${{ steps.version.outputs.version }}" \
-          --notes "✅ Beta release promoted after alpha test pass." \
-          --prerelease
 
 
 
