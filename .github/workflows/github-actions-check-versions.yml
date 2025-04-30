@@ -280,7 +280,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Run all unit tests and set pass flag
-      id: run tests
+      id: run-tests
       run: |
         echo "Running all tests in tests/..."
         if python -m unittest discover -s tests -p "*.py"; then
